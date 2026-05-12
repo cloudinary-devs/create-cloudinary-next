@@ -1,0 +1,25 @@
+{
+  "name": "create-cloudinary-next",
+  "version": "1.0.0-beta-0",
+  "description": "Scaffold a Cloudinary Next.js project with interactive setup",
+  "type": "module",
+  "bin": {
+    "create-cloudinary-react": "./cli.js"
+  },
+  "keywords": [
+    "cloudinary",
+    "next",
+    "typescript",
+    "scaffold"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cloudinary-devs/create-cloudinary-next.git"
+  },
+  "homepage": "https://github.com/cloudinary-devs/create-cloudinary-next#readme",
+  "bugs": {
+    "url": "https://github.com/cloudinary-devs/create-cloudinary-next/issues"
+  }
+}

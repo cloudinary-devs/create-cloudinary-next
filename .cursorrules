@@ -1,0 +1,955 @@
+# Next Cloudinary SDK Patterns & Common Errors
+
+**Scope**: These rules apply to **Next.js (App Router by default, with Pages Router callouts)** using the **`next-cloudinary`** package. They cover `CldImage`, `CldVideoPlayer`, `CldUploadWidget`, `CldUploadButton`, `CldOgImage`, the `getCld*Url` URL helpers, and **server-side** uploads / deletes with the **Cloudinary Node SDK v2** (`cloudinary` package). Rules-only users (no CLI): see **"Project setup (rules-only / without CLI)"** for env, `next.config.js`, the signature route handler, and a Server Action upload/delete pattern.
+
+## Official Documentation
+- **Next Cloudinary docs (start here)**: https://next.cloudinary.dev
+- **Installation**: https://next.cloudinary.dev/installation
+- **CldImage configuration**: https://next.cloudinary.dev/cldimage/configuration
+- **CldImage examples**: https://next.cloudinary.dev/cldimage/examples
+- **CldVideoPlayer configuration**: https://next.cloudinary.dev/cldvideoplayer/configuration
+- **CldUploadWidget configuration**: https://next.cloudinary.dev/clduploadwidget/configuration
+- **CldUploadWidget signed uploads**: https://next.cloudinary.dev/clduploadwidget/signed-uploads
+- **CldOgImage / getCldOgImageUrl**: https://next.cloudinary.dev/cldogimage/basic-usage
+- **Responsive images guide**: https://next.cloudinary.dev/guides/responsive-images
+- **Image optimization guide**: https://next.cloudinary.dev/guides/image-optimization
+- **Social media card guide**: https://next.cloudinary.dev/guides/social-media-card
+- **Uploading images & videos guide**: https://next.cloudinary.dev/guides/uploading-images-and-videos
+- **Cloudinary transformation reference**: https://cloudinary.com/documentation/transformation_reference
+- **Cloudinary transformation rules**: https://cloudinary.com/documentation/cloudinary_transformation_rules
+- **Cloudinary Node.js SDK (server-side)** — use **v2**: `import { v2 as cloudinary } from 'cloudinary'`. Do not use v1. https://cloudinary.com/documentation/node_integration
+- **Upload assets in Next.js (tutorial)**: https://cloudinary.com/documentation/upload_assets_in_nextjs_tutorial
+- **Upload widget reference (parameters & events)**: https://cloudinary.com/documentation/upload_widget_reference
+- Always consult the official transformation reference when generating transformations; use only officially supported parameters.
+
+**Golden rule for next-cloudinary:** Use **only** the prop names and shapes documented in the **CldImage / CldVideoPlayer / CldUploadWidget configuration** pages and in the **"CldImage prop reference"** and **"Overlay/text shape"** sections of these rules. Do not derive prop names from the URL transformation reference (e.g., the URL param is `e_background_removal` but the prop is `removeBackground`). Do not invent prop names.
+
+---
+
+# 📋 PATTERNS (How to Do It Right)
+
+## Which Cloudinary API do I use? (decision tree)
+
+This is the single biggest source of confusion in Next.js + Cloudinary. **Pick the right tool, then the rest is mechanical.**
+
+| You want to… | Use this | Where it runs |
+| --- | --- | --- |
+| Render an `<img>` of a Cloudinary asset in JSX | **`CldImage`** (`next-cloudinary`) | Client component (`"use client"`) **or** Server Component |
+| Get a Cloudinary image URL as a string (for `<meta>`, `<link>`, an API response, an OG image, etc.) | **`getCldImageUrl`** / **`getCldOgImageUrl`** (`next-cloudinary`) | Anywhere — server, client, route handlers, `generateMetadata` |
+| Embed a video player UI | **`CldVideoPlayer`** (`next-cloudinary`) | Client component (`"use client"`) — required |
+| Let the user upload from the browser | **`CldUploadWidget`** or **`CldUploadButton`** (`next-cloudinary`) | Client component (`"use client"`) — required |
+| Generate an OG/social image | App Router → **`getCldOgImageUrl`** in `generateMetadata`. Pages Router → **`CldOgImage`** in the page | Server (App) / Pages Head |
+| Upload a file **from your server** (e.g. a Server Action receiving a `FormData`) | **`cloudinary.uploader.upload`** / **`upload_stream`** (Node SDK v2, `cloudinary`) | Server only (`"use server"` action or route handler) |
+| Delete an asset | **`cloudinary.uploader.destroy`** (Node SDK v2) | Server only |
+| Sign upload widget params on the server | **`cloudinary.utils.api_sign_request`** (Node SDK v2) | Route handler (`/api/sign-cloudinary-params`) |
+| List / search assets, manage tags, etc. | **Cloudinary Admin API** via Node SDK v2 (`cloudinary.api.*`) | Server only |
+
+**Common confusion to flush out before writing code:**
+- ❌ "Should I use `cloudinary.uploader.upload` or `cloudinary.image` or `cloudinary.url`?" → They do **different** things. `cloudinary.uploader.upload` (Node SDK, server) **uploads** a file. `cloudinary.url()` / `cloudinary.image()` (Node SDK, server) build a **URL/HTML tag** from a public ID — for that job, prefer **`getCldImageUrl`** or **`<CldImage>`** in Next.js. They are not interchangeable.
+- ❌ Do **not** call `cloudinary.uploader.upload` from a Client Component or browser code — it requires `api_secret`, which must never reach the browser.
+- ❌ Do **not** use `<CldImage>`/`<CldUploadWidget>`/`<CldVideoPlayer>` in a Server Component that has not been wrapped in `"use client"` — they use React state/effects and will throw.
+- ✅ For "show an image with transformations" the answer is almost always **`<CldImage>`**. For "I just need the URL string" the answer is **`getCldImageUrl`**.
+
+## Project setup (rules-only / without CLI)
+
+If the user is **not** using a CLI scaffold and only has these rules, generate the following so they get a correct config end-to-end.
+
+**1. Install**
+
+```bash
+npm install next-cloudinary
+# Add the Node SDK only if you do server-side uploads/deletes/signing:
+npm install cloudinary
+```
+
+Use `npm install <package>` with **no version** so npm gets the latest compatible version. In `package.json` use a **caret range** (`"next-cloudinary": "^6.0.0"`). Do not pin exact versions unless verified on npm.
+
+**2. Environment (`.env.local`)**
+
+Create `.env.local` in the project root (Next.js auto-loads it, and it must be in `.gitignore`):
+
+```bash
+# Required (public, client-safe)
+NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=your_cloud_name
+
+# Required only for the Upload Widget with SIGNED uploads
+NEXT_PUBLIC_CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret  # ⚠️ SERVER ONLY — never NEXT_PUBLIC_
+
+# Optional advanced config
+NEXT_PUBLIC_CLOUDINARY_SECURE_DISTRIBUTION=cdn.example.com
+NEXT_PUBLIC_CLOUDINARY_PRIVATE_CDN=true
+```
+
+Rules:
+- ✅ `NEXT_PUBLIC_*` is exposed to the browser. Use it for `CLOUD_NAME` and (optionally) `API_KEY` (the API key is not secret).
+- ❌ **Never** prefix `CLOUDINARY_API_SECRET` with `NEXT_PUBLIC_`. The secret must only be read on the server (`process.env.CLOUDINARY_API_SECRET`).
+- ✅ `.env.local` must be in `.gitignore` (Next.js's default `.gitignore` already does this — verify it).
+- ✅ **Restart the dev server** after editing `.env.local`; Next.js does not hot-reload env vars.
+- ❌ Do **not** create a separate `server/.env` or load env files manually with `dotenv` in Next.js — Next.js loads `.env.local` automatically for both server and client (with the `NEXT_PUBLIC_` rule).
+
+**3. `next.config.js` (only if you use `<Image>` or fetch Cloudinary URLs through the Next image optimizer)**
+
+`<CldImage>` already serves through Cloudinary's CDN, so it does **not** require `images.remotePatterns` to work. Add `remotePatterns` only if you also use the standard Next.js `<Image>` with a Cloudinary `src`:
+
+```js
+// next.config.js
+/** @type {import('next').NextConfig} */
+module.exports = {
+  images: {
+    remotePatterns: [
+      { protocol: 'https', hostname: 'res.cloudinary.com' },
+    ],
+  },
+};
+```
+
+**4. Signature route handler (only if signed uploads)**
+
+Create `app/api/sign-cloudinary-params/route.ts` (App Router) — see **"Signed uploads (App Router)"** below for the canonical implementation.
+
+**5. Summary for rules-only users**
+- **Env**: `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` is required; add `NEXT_PUBLIC_CLOUDINARY_API_KEY` + `CLOUDINARY_API_SECRET` only when signing uploads. Restart dev server after edits.
+- **No `Cloudinary` instance to construct**: `next-cloudinary` reads env automatically. Just import components/helpers and use them.
+- **Components are client-side**: `CldUploadWidget`, `CldUploadButton`, `CldVideoPlayer` always need `"use client"`. `CldImage` works in both, but make the file a Client Component if you also use refs / event handlers / state with it.
+- **Server work uses the Node SDK** (`cloudinary` v2) inside Server Actions or route handlers — never in client code.
+
+## Environment Variables
+
+- ✅ **Required**: `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` in `.env.local`. Access via `process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` if you ever need to read it directly (most code doesn't — `next-cloudinary` reads it for you).
+- ✅ **For signed uploads**: `NEXT_PUBLIC_CLOUDINARY_API_KEY` (public) and `CLOUDINARY_API_SECRET` (server only).
+- ✅ Restart the dev server after any `.env*` change.
+- ❌ Do not put `CLOUDINARY_API_SECRET` in `NEXT_PUBLIC_*` or any file that is sent to the browser.
+- ❌ Do not commit `.env`, `.env.local`, `.env.development`, or `.env.production`. Verify they're in `.gitignore`.
+
+### Environment Variable Typing (TypeScript)
+
+Add a `next-env.d.ts` augmentation (or a separate `env.d.ts`) so `process.env` is typed:
+
+```ts
+// env.d.ts
+declare namespace NodeJS {
+  interface ProcessEnv {
+    NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME: string;
+    NEXT_PUBLIC_CLOUDINARY_API_KEY?: string;
+    CLOUDINARY_API_SECRET?: string;
+  }
+}
+export {};
+```
+
+## Upload Presets
+
+- **Unsigned** = client-only uploads, no backend. **Signed** = backend required, more secure. See **"Signed vs unsigned uploads"** below for when to use which.
+- ✅ Create the preset at https://console.cloudinary.com/app/settings/upload/presets
+- ✅ For unsigned: set the preset's **Signing Mode** to **Unsigned**, then pass the preset name to `<CldUploadWidget uploadPreset="..." />`.
+- ✅ For signed: set the preset to **Signed** (or use the built-in `ml_default`, which is signed by default — note that users can delete it).
+- ⚠️ If the preset is missing or the wrong type, the widget shows an error like "Upload preset not found" or "Invalid upload preset for unsigned upload".
+- **When unsigned upload fails** — debug checklist:
+  1. Is the preset name in `uploadPreset` exactly correct (no typos)?
+  2. Does the preset exist in the dashboard?
+  3. Is it set to **Unsigned**?
+  4. Was the dev server restarted after `.env.local` changes?
+
+## Installing Cloudinary packages
+
+- ✅ **Install latest**: `npm install <package>` (no version) so npm gets the latest compatible. Use a caret in `package.json`. Do not pin to an exact version unless verified on npm.
+- ✅ **Package names only**: `next-cloudinary` (the Next.js wrapper), `cloudinary` (Node SDK v2 — server-side only). Do not invent names like `@cloudinary/next` or `next-cloudinary-server`.
+- ❌ **WRONG**: `npm install next-cloudinary@1.2.3` (exact pin) when you haven't verified the version exists.
+- ❌ **WRONG**: Installing `@cloudinary/url-gen` or `@cloudinary/react` for a Next.js project — `next-cloudinary` already wraps the URL builder. Only install those if the user explicitly wants to bypass `next-cloudinary`.
+
+## Import Patterns
+
+```ts
+// Components (client components)
+import { CldImage, CldVideoPlayer, CldUploadWidget, CldUploadButton, CldOgImage } from 'next-cloudinary';
+
+// URL helpers (isomorphic — server, client, metadata, route handlers)
+import { getCldImageUrl, getCldOgImageUrl, getCldVideoUrl } from 'next-cloudinary';
+
+// Video player CSS — required only when using CldVideoPlayer
+import 'next-cloudinary/dist/cld-video-player.css';
+
+// Server-side Node SDK v2 (only in route handlers / Server Actions / server-only files)
+import { v2 as cloudinary } from 'cloudinary';
+```
+
+- ❌ **WRONG**: `import { CldImage } from '@cloudinary/next'` — package does not exist.
+- ❌ **WRONG**: `import cloudinary from 'cloudinary'` — gives you v1 namespace; always use `import { v2 as cloudinary } from 'cloudinary'`.
+- ❌ **WRONG**: `import 'cloudinary-video-player/cld-video-player.min.css'` — that's the React rules' path. In Next.js use `next-cloudinary/dist/cld-video-player.css`.
+
+## CldImage — basic usage
+
+`CldImage` extends Next.js `<Image>`. **Required props**: `src` (a Cloudinary public ID), `alt`, `width`, `height` (or `fill`).
+
+```tsx
+import { CldImage } from 'next-cloudinary';
+
+<CldImage
+  src="samples/cloudinary-icon"   // public ID, NOT a URL
+  width={960}
+  height={600}
+  sizes="100vw"                   // strongly recommended for responsive
+  alt="Cloudinary icon"
+/>;
+```
+
+- ✅ **`src` is a public ID**, e.g. `"samples/cloudinary-icon"` or `"my-folder/my-image"`. Do **not** include a file extension. Slashes are allowed for folders. Public IDs are case-sensitive.
+- ✅ A full Cloudinary URL is also accepted as `src` **only if it includes a version segment** (e.g. `/v1234/`). To preserve transformations already in that URL, also pass `preserveTransformations`.
+- ✅ Pass a **`sizes`** prop on every `<CldImage>` that isn't a fixed-size icon — this is what powers responsive `srcset`. See "Responsive images".
+- ✅ **Optimization is automatic**: by default `format=auto` and `quality=auto` are applied. Don't add raw `f_auto` / `q_auto` yourself.
+- ✅ `<CldImage>` can render in a Server Component, **but** if the file uses event handlers (`onLoad`, `onError`), refs, or other client-only APIs, add `"use client"` at the top of the file.
+
+### Sample assets (use for demos when no upload yet)
+
+Cloudinary accounts ship with sample public IDs that **may** exist (users can delete them — always handle `onError`):
+- Images: `samples/cloudinary-icon`, `samples/two-ladies`, `samples/food/spices`, `samples/landscapes/beach-boat`, `samples/bike`, `samples/landscapes/girl-urban-view`, `samples/animals/reindeer`, `samples/food/pot-mussels`
+- Video: `samples/elephants`
+- ✅ Default for a single image: `samples/cloudinary-icon`. Prefer uploaded assets when available.
+
+## CldImage — transformations (the canonical prop reference)
+
+Use **only** the prop names and shapes below (and on https://next.cloudinary.dev/cldimage/configuration). These are not the same as the underlying URL transformation params.
+
+### Basic transformations
+| Prop | Type | Example |
+| --- | --- | --- |
+| `crop` | `string \| object \| object[]` | `"fill"`, `{ type: 'thumb', source: true }` |
+| `gravity` | `string` | `"face"`, `"auto"` |
+| `aspectRatio` | `string` | `"16:9"` (requires `fill` + a crop mode that crops; omit `width`/`height`) |
+| `angle` | `number \| string` | `45` |
+| `background` | `string` | `"blue"`, `"rgb:0000ff"` |
+
+### Generative AI / advanced editing
+| Prop | Type | Example |
+| --- | --- | --- |
+| `removeBackground` | `boolean \| string` | `removeBackground` |
+| `replaceBackground` | `boolean \| string \| object` | `"fish tank"` or `{ prompt: 'fish tank', seed: 3 }` |
+| `fillBackground` | `boolean \| object` | `fillBackground` or `{ crop: 'pad', gravity: 'south', prompt: 'cupcakes' }` |
+| `extract` | `string \| string[] \| object` | `"space jellyfish"` |
+| `remove` | `string \| string[] \| object` | `"apple"` or `{ prompt: 'apple', multiple: true, removeShadow: true }` |
+| `replace` | `string[] \| object` | `['apple', 'banana']` or `{ from: 'apple', to: 'banana' }` |
+| `recolor` | `[string, string] \| object` | `['duck', 'blue']` |
+| `restore` | `boolean` | `restore` |
+| `enhance` | `boolean` | `enhance` |
+
+### Optimization & delivery
+| Prop | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `format` | `string` | `auto` | Override only for specific cases (e.g. `"png"`) |
+| `quality` | `string \| number` | `auto` | Use `"default"` to omit `q_*` (needed for `flags: ['keep_iptc']`) |
+| `dpr` | `number \| string` | — | `"2.0"` or `"auto"` |
+| `unoptimized` | `boolean` | — | Skips both `f_auto` and `q_auto` |
+| `deliveryType` | `string` | `upload` | e.g. `"fetch"` |
+| `assetType` | `string` | `image` | Use `"video"` to make a thumbnail from a video public ID |
+| `flags` | `string[]` | — | e.g. `['keep_iptc']` |
+| `version` | `number \| string` | — | e.g. `1234` |
+
+### Escape hatches
+| Prop | Use when… |
+| --- | --- |
+| `effects` | You want to chain multiple effect blocks: `effects={[{ background: 'green' }, { gradientFade: true }]}` |
+| `namedTransformations` | You have a named transformation in your Cloudinary account: `namedTransformations={['my-named']}` |
+| `rawTransformations` | You need a transformation not exposed as a prop: `rawTransformations={['e_blur:2000']}` |
+| `preserveTransformations` | The `src` is a full Cloudinary URL with transformations to keep |
+| `strictTransformations` | Account requires strict mode (only `namedTransformations` allowed) |
+
+❌ **Do NOT**: pass `f_auto`, `q_auto`, `c_fill`, etc. via `rawTransformations` and also via the named props — pick one. Mixing causes duplicates and unpredictable URLs.
+
+### Cropping — the `fill` prop trap
+
+Two distinct things share the word "fill":
+- **`fill={true}`** (Next Image prop) — render the image absolutely-positioned, filling the parent. No `width`/`height` required; parent must be `position: relative`. Combine with `aspectRatio` for ratio-locked containers.
+- **`crop="fill"`** (Cloudinary crop mode) — Cloudinary **crops** the asset to the requested width/height.
+
+These are independent. You can use both: `<CldImage fill crop="fill" aspectRatio="16:9" sizes="100vw" alt="..." />`.
+
+❌ **WRONG**: Using `aspectRatio` with explicit `width`/`height` and no `fill` — `aspectRatio` won't apply because Next Image needs concrete dimensions.
+✅ **CORRECT**: For `aspectRatio`, also pass `fill` and a crop mode (e.g. `"fill"`, `"thumb"`); omit `width`/`height`.
+
+### Two-stage cropping for dynamic crop modes
+
+Dynamic crop modes (`thumb`, `crop` with no coordinates, etc.) produce **different visual results at different sizes**, which interacts badly with responsive `srcset`. To keep results consistent across breakpoints, crop the **source** image first, then let responsive sizing resize it:
+
+```tsx
+<CldImage
+  src="<Public ID>"
+  width={960}
+  height={960}
+  crop={{ type: 'thumb', source: true }}   // source: true → applied to original asset
+  sizes="100vw"
+  alt=""
+/>
+```
+
+You can also pin the source crop dimensions:
+
+```tsx
+crop={{ type: 'thumb', width: 1200, height: 1200, source: true }}
+```
+
+❌ **WRONG**: Using `crop="thumb"` with `sizes="100vw"` — the thumbnail content shifts as the viewport changes.
+✅ **CORRECT**: Use object form with `source: true` for `thumb`-style crops.
+
+## getCldImageUrl — same API as CldImage, returns a URL string
+
+Use when you need a URL string (metadata, route handlers, plain `<img>` outside React, server-side prefetching, etc.). Same options as `CldImage`.
+
+```ts
+import { getCldImageUrl } from 'next-cloudinary';
+
+const url = getCldImageUrl({
+  src: 'samples/cloudinary-icon',
+  width: 960,
+  height: 600,
+  crop: 'fill',
+  removeBackground: true,
+});
+```
+
+✅ **Use `getCldImageUrl` instead of constructing Cloudinary URLs by hand or with `cloudinary.url()` from the Node SDK** — it stays in sync with `<CldImage>` semantics (auto format/quality, two-stage crop opt-ins, etc.).
+
+## Responsive images
+
+- ✅ **Always pass `sizes`** on `<CldImage>` unless it's a known fixed-size icon. Without `sizes`, the browser defaults to `100vw` and may pick an oversized variant.
+- ✅ Cloudinary automatically generates a `srcset` for the standard Next.js breakpoints — **you do not need to set `srcSet` manually**.
+- ✅ Default crop mode is `limit`, which won't upscale beyond the original. To allow upscaling, use `crop="scale"` (note: may produce blurry images).
+
+```tsx
+<CldImage
+  src="<Public ID>"
+  width={1200}
+  height={800}
+  sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+  alt=""
+/>
+```
+
+## CldVideoPlayer — the player
+
+Wraps the Cloudinary Video Player. **Required**: `width`, `height`, `src`. **Always** import the CSS once on the page (or in a layout).
+
+```tsx
+'use client';
+
+import { CldVideoPlayer } from 'next-cloudinary';
+import 'next-cloudinary/dist/cld-video-player.css';
+
+<CldVideoPlayer
+  width="1920"
+  height="1080"
+  src="samples/elephants"
+/>;
+```
+
+- ✅ **`"use client"` is required** — the player mounts a video element, attaches refs, and uses effects.
+- ✅ CSS path is exactly `next-cloudinary/dist/cld-video-player.css`. No other variant is exposed.
+- ✅ Use `colors`, `fontFace`, `logo`, `poster`, `textTracks` for customization (see CldVideoPlayer configuration page).
+- ✅ For event hooks: `onMetadataLoad`, `onPlay`, `onPause`, `onEnded`, `onError` — each receives `{ player }`. The player exposes `player.duration()`, `player.currentTime()`, etc.
+- ✅ For programmatic control, pass `playerRef` (Cloudinary player) or `videoRef` (HTML video element) refs.
+- ❌ **Don't** import the `cloudinary-video-player` package directly in a Next.js app — `next-cloudinary` wraps it.
+- ❌ **Don't** put `<CldVideoPlayer>` in a Server Component without `"use client"`.
+
+## CldUploadWidget — uploading from the browser
+
+```tsx
+'use client';
+
+import { CldUploadWidget } from 'next-cloudinary';
+
+<CldUploadWidget uploadPreset="<unsigned-preset>">
+  {({ open }) => (
+    <button type="button" onClick={() => open()}>Upload</button>
+  )}
+</CldUploadWidget>;
+```
+
+- ✅ **`"use client"` is required**.
+- ✅ The widget renders **nothing by default** — pass a function-as-children that returns the trigger UI. The function receives `{ open, close, cloudinary, widget, results, error, isLoading }`.
+- ✅ Use `<CldUploadButton>` for a one-line drop-in if you don't need custom UI.
+- ✅ **Default to unsigned uploads** unless the user explicitly asks for "secure" or "signed". Signed requires a running backend route and will fail out of the box without it.
+- ✅ Pass widget params via the `options` prop, not as top-level props (sources, multiple, maxFiles, folder, tags, etc.):
+
+```tsx
+<CldUploadWidget
+  uploadPreset="..."
+  options={{
+    sources: ['local', 'url', 'camera'],
+    multiple: false,
+    maxFiles: 1,
+    folder: 'user-uploads',
+  }}
+>{({ open }) => <button onClick={() => open()}>Upload</button>}</CldUploadWidget>
+```
+
+### Upload events (use `onSuccess`, NOT `onUpload`)
+
+```tsx
+<CldUploadWidget
+  uploadPreset="..."
+  onSuccess={(result, { widget }) => {
+    // result.event === 'success'
+    // result.info has { public_id, secure_url, width, height, format, ... }
+    if (typeof result?.info === 'object' && result.info && 'public_id' in result.info) {
+      console.log('Uploaded:', result.info.public_id);
+    }
+    widget.close();
+  }}
+  onError={(error) => console.error(error)}
+  onQueuesEnd={(_, { widget }) => widget.close()}
+>{({ open }) => <button onClick={() => open()}>Upload</button>}</CldUploadWidget>
+```
+
+- ✅ **Prefer `onSuccess`** — `onUpload` is deprecated.
+- ✅ The "Action" variants (`onSuccessAction`, `onUploadAddedAction`, etc.) are the same events but only receive `results` (no widget instance) — use them when wiring directly to a Server Action so the callback is serializable.
+- ✅ `result.info` shape includes at least: `public_id`, `secure_url`, `url`, `width`, `height`, `format`, `resource_type`, `bytes`, `created_at`. Type it explicitly (see TypeScript section).
+- ❌ **Don't** treat `result.info` as always an object — when the event isn't `success` it can be a string. Narrow before accessing.
+
+### Signed uploads (App Router) — canonical pattern
+
+When the user wants signed/secure uploads, do this end-to-end:
+
+**1. Pass `signatureEndpoint` to the widget instead of `uploadPreset`-only:**
+
+```tsx
+'use client';
+import { CldUploadWidget } from 'next-cloudinary';
+
+<CldUploadWidget
+  signatureEndpoint="/api/sign-cloudinary-params"
+  uploadPreset="<signed-preset>"   // optional; widget will sign whatever params it sends
+  options={{ folder: 'user-uploads' }}
+  onSuccess={(result) => console.log(result.info)}
+>
+  {({ open }) => <button onClick={() => open()}>Upload</button>}
+</CldUploadWidget>;
+```
+
+**2. Create the route handler at `app/api/sign-cloudinary-params/route.ts`:**
+
+```ts
+import { v2 as cloudinary } from 'cloudinary';
+
+cloudinary.config({
+  cloud_name: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.NEXT_PUBLIC_CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+export async function POST(request: Request) {
+  const { paramsToSign } = (await request.json()) as { paramsToSign: Record<string, string | number> };
+
+  const signature = cloudinary.utils.api_sign_request(
+    paramsToSign,
+    process.env.CLOUDINARY_API_SECRET as string,
+  );
+
+  return Response.json({ signature });
+}
+```
+
+**Rules**:
+- ✅ Return shape **must be** `{ signature }`. Do **not** wrap it (`{ data: { signature } }` will not work).
+- ✅ Use the **Node SDK v2** (`import { v2 as cloudinary } from 'cloudinary'`). Do not use v1.
+- ✅ The route runs on the Node.js runtime by default — fine. If you set `export const runtime = 'edge'`, **switch back** to Node: the Node SDK depends on Node-only APIs.
+- ❌ **Never** read `process.env.CLOUDINARY_API_SECRET` in a Client Component or anywhere it could be bundled to the browser.
+- ❌ **Don't** add the secret as `NEXT_PUBLIC_CLOUDINARY_API_SECRET` — that exposes it.
+- ❌ **Don't** invent a custom signature shape — the widget calls the endpoint and expects `{ signature }`. If you also want timestamp/api_key, return them too, but the field name `signature` is required.
+
+**Pages Router equivalent**: `pages/api/sign-cloudinary-params.js` exporting a default handler that does `res.status(200).json({ signature })` with the same `cloudinary.utils.api_sign_request` call.
+
+### Signed vs unsigned — when to use which
+
+**Unsigned** (simpler, no backend):
+- For: prototypes, low-risk apps, when anyone with the preset name may upload.
+- Trade-off: anyone who learns the preset name can upload to your cloud (subject to preset restrictions).
+- ✅ Set the preset to **Unsigned** in the dashboard, add `uploadPreset="<name>"` to the widget. Done.
+
+**Signed** (backend required):
+- For: production, authenticated users, controlled uploads.
+- Trade-off: requires a running route handler. More secure.
+- ✅ Use `signatureEndpoint` + the route handler above.
+
+**Default**: prefer unsigned unless the user explicitly asks for signed/secure uploads.
+
+## Server-side upload (Server Action / route handler)
+
+Use the Node SDK v2 directly. This is for: uploading a file you already have on the server (e.g. a Server Action receiving a `FormData`), uploading a remote URL, scheduled jobs, etc.
+
+```ts
+// app/actions/upload.ts
+'use server';
+
+import { v2 as cloudinary, type UploadApiResponse } from 'cloudinary';
+
+cloudinary.config({
+  cloud_name: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.NEXT_PUBLIC_CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+export async function uploadImage(formData: FormData): Promise<{ publicId: string; url: string }> {
+  const file = formData.get('file');
+  if (!(file instanceof File)) throw new Error('No file provided');
+
+  const arrayBuffer = await file.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  const result = await new Promise<UploadApiResponse>((resolve, reject) => {
+    cloudinary.uploader
+      .upload_stream({ folder: 'user-uploads', resource_type: 'auto' }, (err, res) => {
+        if (err || !res) return reject(err);
+        resolve(res);
+      })
+      .end(buffer);
+  });
+
+  return { publicId: result.public_id, url: result.secure_url };
+}
+```
+
+- ✅ **`"use server"`** at the top of the file (Server Actions) **or** put this in a route handler — never in a client file.
+- ✅ Use `upload_stream` with a `Buffer` for `File`/`Blob` inputs from `FormData`. For URL or base64 string inputs, use `cloudinary.uploader.upload(input, options)`.
+- ✅ `resource_type: 'auto'` works for both images and videos.
+- ✅ Configure `cloudinary` at module scope (top of the file) — config is idempotent.
+- ❌ **Don't** call `cloudinary.uploader.upload` from a Client Component.
+- ❌ **Don't** use the Edge runtime for routes/actions that import `cloudinary` — it will fail. Default Node runtime is fine.
+- ❌ **Don't** read or stream the file before converting to `Buffer`/base64 — `File` objects from `FormData` don't pass directly to `upload`.
+
+## Delete an asset (Server Action / route handler)
+
+```ts
+// app/actions/delete.ts
+'use server';
+
+import { v2 as cloudinary } from 'cloudinary';
+
+cloudinary.config({
+  cloud_name: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.NEXT_PUBLIC_CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+export async function deleteAsset(
+  publicId: string,
+  resourceType: 'image' | 'video' | 'raw' = 'image',
+): Promise<{ result: string }> {
+  const res = await cloudinary.uploader.destroy(publicId, {
+    resource_type: resourceType,
+    invalidate: true,   // purge the CDN cache
+  });
+  // res.result === 'ok' | 'not found'
+  return { result: res.result };
+}
+```
+
+- ✅ **`destroy` takes a public ID, not a URL.** Strip any URL/extension first if needed.
+- ✅ Pass `resource_type: 'video'` for video assets, `'raw'` for non-image/non-video. The default is `'image'`.
+- ✅ Pass `invalidate: true` to evict the CDN cache (one of the most common follow-up bug reports).
+- ✅ A successful response is `{ result: 'ok' }`; a missing asset is `{ result: 'not found' }` — handle both.
+- ❌ **Don't** call `destroy` from the client — it requires `api_secret`.
+- ❌ **Don't** confuse `destroy` (single asset) with `delete_resources` (admin API, batch).
+
+## Image overlays — the `overlays` prop shape
+
+```tsx
+<CldImage
+  src="<Public ID>"
+  width={960}
+  height={600}
+  sizes="100vw"
+  overlays={[
+    {
+      publicId: 'logo',                 // image overlay
+      position: { x: 50, y: 50, gravity: 'south_east' },
+      effects: [{ crop: 'fill', gravity: 'auto', width: 200, height: 200 }],
+      appliedEffects: [{ multiply: true }],   // blend modes go here
+    },
+  ]}
+  alt=""
+/>;
+```
+
+```tsx
+// Text overlay
+overlays={[
+  {
+    position: { x: 0, y: 80, gravity: 'south' },
+    text: {
+      color: 'white',
+      fontFamily: 'Source Sans Pro',
+      fontSize: 80,
+      fontWeight: 'bold',
+      text: 'Hello',
+    },
+  },
+]}
+```
+
+Rules for the overlay shape:
+- ✅ **Image overlay** → use `publicId` (just the ID, no URL, no extension).
+- ✅ **Text overlay** → use a `text` object (with `text` inside it being the actual string). Do **not** put text under `publicId`.
+- ✅ **Position** → object with `x`, `y`, `gravity` (and optional `angle`). `gravity` strings use **underscores**: `"south_east"`, `"north_west"`, `"center"` — not camelCase.
+- ✅ **Effects** (sizing, crop, color, etc.) go in `effects: [...]`. **Blend modes** (`multiply`, `screen`, `overlay`, etc.) go in `appliedEffects: [...]`.
+- ✅ For relative sizing, set widths/heights as fractional strings (`"0.5"`) and add `flags: ['relative']`.
+- ❌ Don't try to use the `@cloudinary/url-gen` overlay builder API (`source(text(...))`, `compass(...)`, etc.) — that's the React/Vite SDK. In `next-cloudinary` everything is a plain prop object.
+
+For a single text on an image, the convenience prop also works:
+
+```tsx
+<CldImage src="..." width={960} height={600} text="Hello" alt="" />
+```
+
+## Social media cards (OG images)
+
+**App Router** — use `getCldOgImageUrl` inside `generateMetadata`:
+
+```ts
+// app/blog/[slug]/page.tsx
+import type { Metadata } from 'next';
+import { getCldOgImageUrl } from 'next-cloudinary';
+
+export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
+  const ogUrl = getCldOgImageUrl({
+    src: 'blog/cover',
+    overlays: [
+      {
+        text: { color: 'white', fontFamily: 'Source Sans Pro', fontSize: 80, fontWeight: 'bold', text: params.slug },
+        position: { x: 0, y: 0, gravity: 'center' },
+      },
+    ],
+  });
+
+  return {
+    openGraph: { images: [{ url: ogUrl, width: 1200, height: 630 }] },
+    twitter: { card: 'summary_large_image', images: [ogUrl] },
+  };
+}
+```
+
+**Pages Router** — use `<CldOgImage>` inside the page (NOT inside `<Head>`); it injects the meta tags:
+
+```tsx
+import { CldOgImage } from 'next-cloudinary';
+
+export default function Page() {
+  return (
+    <>
+      <CldOgImage src="blog/cover" alt="Cover" />
+      <main>…</main>
+    </>
+  );
+}
+```
+
+- ❌ **`<CldOgImage>` does NOT work in the App Router.** Use `getCldOgImageUrl` in `generateMetadata` instead. `next-cloudinary` will warn / silently no-op otherwise.
+- ✅ OG images are **1200×630** by default. Override via `width`/`height` if needed.
+
+## TypeScript Patterns
+
+### Upload result type
+
+The widget result `info` shape is documented but loosely typed. Define a local interface and narrow:
+
+```ts
+export interface CloudinaryUploadResult {
+  public_id: string;
+  secure_url: string;
+  url: string;
+  width: number;
+  height: number;
+  format: string;
+  resource_type: 'image' | 'video' | 'raw';
+  bytes: number;
+  created_at: string;
+  // …extend with any other fields you need
+}
+
+function isUploadInfo(info: unknown): info is CloudinaryUploadResult {
+  return (
+    typeof info === 'object' &&
+    info !== null &&
+    'public_id' in info &&
+    typeof (info as CloudinaryUploadResult).public_id === 'string'
+  );
+}
+```
+
+Then narrow inside callbacks:
+
+```tsx
+<CldUploadWidget
+  uploadPreset="..."
+  onSuccess={(result) => {
+    if (isUploadInfo(result?.info)) {
+      const { public_id, secure_url } = result.info;
+    }
+  }}
+>{({ open }) => <button onClick={() => open()}>Upload</button>}</CldUploadWidget>
+```
+
+- ❌ **WRONG**: `onSuccess={(result: any) => …}` — use the type emitted by `next-cloudinary` plus your narrowed type.
+- ❌ **WRONG**: Treating `result.info` as always being an object — it can be a string for non-success events.
+
+### Server-side upload result
+
+The Node SDK exports types — use them:
+
+```ts
+import { v2 as cloudinary, type UploadApiResponse, type UploadApiErrorResponse } from 'cloudinary';
+```
+
+`UploadApiResponse` covers the full response shape (`public_id`, `secure_url`, `width`, `height`, `bytes`, `format`, `resource_type`, `created_at`, etc.).
+
+### Refs
+
+```tsx
+import type { CldVideoPlayerProps } from 'next-cloudinary';
+import { useRef } from 'react';
+
+const playerRef = useRef<unknown>(null);     // Cloudinary player instance — type as unknown until you need methods
+const videoRef = useRef<HTMLVideoElement>(null);
+```
+
+### Avoid `any`
+- ❌ **WRONG**: `const result: any = …`
+- ✅ **CORRECT**: `unknown` + a narrowing type guard, or the explicit type from the SDK.
+
+## Best Practices
+- ✅ Default to `<CldImage>` for any Cloudinary image. Use `getCldImageUrl` only when you need a string URL.
+- ✅ Always pass `sizes` for non-icon images.
+- ✅ Always include `alt` on `<CldImage>`.
+- ✅ Use `crop={{ type: '<dynamic>', source: true }}` for dynamic crops (`thumb`, etc.) so responsive variants stay consistent.
+- ✅ For `aspectRatio`, also use `fill` and a crop mode that crops; omit `width`/`height`.
+- ✅ Store `public_id` from upload results (and asset type / dimensions if you'll need them) — not the full URL.
+- ✅ For client uploads, default to **unsigned**; switch to signed only when explicitly requested.
+- ✅ Never hold the API secret on the client; never prefix it with `NEXT_PUBLIC_`.
+- ✅ Add `"use client"` at the top of any file that uses `CldUploadWidget`, `CldUploadButton`, or `CldVideoPlayer`.
+- ✅ Use the **Node SDK v2** (`import { v2 as cloudinary } from 'cloudinary'`) for all server-side upload/delete/sign work; run on the Node runtime.
+- ✅ Pass `invalidate: true` on `destroy` to evict the CDN cache.
+- ✅ Use TypeScript: type upload results, env vars, refs.
+
+---
+
+# ⚠️ COMMON ERRORS & SOLUTIONS
+
+## Environment Variable Errors
+
+### "Cloud name is required" / images don't render
+- ❌ Problem: `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` is missing or has the wrong prefix.
+- ✅ Solution:
+  1. `.env.local` exists at the project root with `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=...` (note the `NEXT_PUBLIC_` prefix).
+  2. `.env.local` is in `.gitignore`.
+  3. **Restart `next dev`** after changes.
+
+### "Invalid Signature" on a signed upload
+- ❌ Problem: `CLOUDINARY_API_SECRET` is missing on the server, or the route handler uses a stale value, or the signature endpoint returns the wrong shape.
+- ✅ Solution:
+  1. Confirm `CLOUDINARY_API_SECRET` is set on the server **without** `NEXT_PUBLIC_`.
+  2. Confirm the route handler returns `{ signature }` (not `{ data: { signature } }`, not just the raw string).
+  3. Confirm you're calling `cloudinary.utils.api_sign_request(paramsToSign, process.env.CLOUDINARY_API_SECRET)` — passing the secret as the second arg, on every request.
+  4. Confirm you're using **Node SDK v2** (`import { v2 as cloudinary } from 'cloudinary'`), not v1.
+  5. Confirm the route runs on the **Node** runtime (default), not Edge.
+
+### "process.env.CLOUDINARY_API_SECRET is undefined" in a Server Action
+- ❌ Problem: `.env.local` not loaded (file misnamed, or in the wrong directory) or the dev server wasn't restarted.
+- ✅ Solution: confirm filename (`.env.local`, not `.env.local.txt`), location (project root), and restart the dev server. Don't use `dotenv` manually — Next.js loads it automatically.
+
+## Component / "use client" errors
+
+### "You're importing a component that needs `useState` (or `useEffect`, `createContext`, etc.). It only works in a Client Component."
+- ❌ Problem: `<CldUploadWidget>`, `<CldUploadButton>`, or `<CldVideoPlayer>` rendered in a Server Component without `"use client"`.
+- ✅ Solution: add `"use client"` at the top of the file (or extract the widget/player into its own client component and import it from a server file).
+
+### `CldImage` works in a server file but breaks when I add an `onLoad` handler
+- ❌ Problem: Event handlers can only be passed to Client Components.
+- ✅ Solution: add `"use client"` at the top of the file, or split: keep `<CldImage>` as a child in a server file, but render it from a small `"use client"` wrapper that owns the handler.
+
+### "useRouter is not a function" / random hook errors near `<CldUploadWidget>`
+- ❌ Problem: Same — missing `"use client"` directive, or an old version of `next-cloudinary` mismatched with your Next.js version.
+- ✅ Solution: confirm `"use client"`; upgrade to the latest `next-cloudinary` (`npm install next-cloudinary@latest`).
+
+## Import Errors
+
+### "Cannot find module 'next-cloudinary/dist/cld-video-player.css'"
+- ❌ Problem: Wrong path or the package isn't installed.
+- ✅ Solution: install `next-cloudinary` (latest), then import exactly: `import 'next-cloudinary/dist/cld-video-player.css';`. Don't use `cloudinary-video-player/...` — that's the standalone package, not the Next wrapper.
+
+### "Module not found: cloudinary" in a route handler
+- ❌ Problem: `cloudinary` (Node SDK) wasn't installed.
+- ✅ Solution: `npm install cloudinary`. Verify import is `import { v2 as cloudinary } from 'cloudinary'`.
+
+### Edge runtime errors when importing `cloudinary`
+- ❌ Problem: Route handler or middleware has `export const runtime = 'edge'`, but the Cloudinary Node SDK requires Node APIs.
+- ✅ Solution: remove the edge runtime from that file (default Node runtime is fine), or move the SDK call to a Node-runtime route.
+
+## CldImage Errors
+
+### Image renders broken / 404
+- ✅ Checks:
+  1. Is `src` a **public ID** (no extension, no leading slash, case-sensitive)? If you pass a URL, it must include `/v1234/`.
+  2. Is the asset actually in this Cloudinary cloud? Mismatch between cloud names and uploaded assets is common.
+  3. Are you using a sample public ID that the user may have deleted? Add an `onError` fallback.
+
+### `aspectRatio` has no effect
+- ❌ Problem: `aspectRatio` only applies in some crop modes (`auto`, `crop`, `fill`, `lfill`, `fill_pad`, `thumb`) AND requires no concrete `width`/`height`.
+- ✅ Solution: pass `fill` (Next Image fill prop), a crop mode that crops (e.g. `crop="fill"`), and **omit** `width`/`height`. Wrap the parent with `position: relative` and an `aspect-ratio` style.
+
+### Image looks low-resolution at large sizes
+- ❌ Problem: Older versions of `next-cloudinary` did 2-stage cropping by default, which capped resolution. v6+ removed that default.
+- ✅ Solution: upgrade to `next-cloudinary` v6+. If you opt back in via `crop={{ type: '...', source: true }}`, set the source `width`/`height` large enough.
+
+### Dynamic crop changes appearance at different breakpoints
+- ❌ Problem: `thumb` (and similar) crops differ per requested size.
+- ✅ Solution: use the two-stage crop pattern — `crop={{ type: 'thumb', source: true }}`.
+
+### Mixing `f_auto`/`q_auto` props with `rawTransformations` produces duplicates
+- ❌ Problem: Setting `format` or `quality` in props **and** in `rawTransformations`.
+- ✅ Solution: pick one. If `rawTransformations` already includes `f_auto`/`q_auto`, those are detected and the props won't double-add — but don't set `format="auto"` and `rawTransformations={['f_auto']}` together; pick one path.
+
+### "preserveTransformations" doesn't preserve anything
+- ❌ Problem: The full Cloudinary URL passed as `src` doesn't include a version segment (`/v1234/`).
+- ✅ Solution: include the version. Without it, the URL parser can't safely identify where transformations end.
+
+## Upload Widget Errors
+
+### Upload fails for unsigned uploads — debug checklist
+- ✅ In order:
+  1. Is `uploadPreset` set on the widget and spelled exactly the same as in the dashboard?
+  2. Does the preset exist?
+  3. Is it set to **Unsigned** in the dashboard?
+  4. Was the dev server restarted after `.env.local` changes?
+  5. Are file size / type allowed by the preset?
+
+### "Upload preset must be whitelisted for unsigned uploads"
+- ❌ Problem: The preset is **Signed** in the dashboard, but you used `uploadPreset` without `signatureEndpoint`.
+- ✅ Solution: either flip the preset to Unsigned in the dashboard, or add a `signatureEndpoint` (see signed uploads pattern).
+
+### `onUpload` is never called
+- ❌ Problem: `onUpload` is deprecated in v6.
+- ✅ Solution: use `onSuccess`. The argument shape is similar: `(result, { widget }) => …`.
+
+### `result.info` is a string, not an object
+- ❌ Problem: You're handling a non-success event (e.g. `queues-end`, `display-changed`) where `info` is a string.
+- ✅ Solution: only treat `result.info` as upload info inside `onSuccess`, and narrow with a type guard before reading `public_id`.
+
+### Widget opens, user uploads, but nothing happens after
+- ❌ Problem: You may be handling `onSuccess` but never closing the widget — looks broken to the user.
+- ✅ Solution: call `widget.close()` from `onSuccess` (or use `onQueuesEnd` for multi-file uploads).
+
+## Signed Upload Errors
+
+### Route handler returns 200 but widget still says "Invalid Signature"
+- ❌ Problem: Wrong response shape, or the secret used to sign doesn't match the cloud name being uploaded to.
+- ✅ Solution:
+  1. Return exactly `{ signature }` (you can include `timestamp`, `api_key`, `cloud_name` too, but the field name `signature` must be present).
+  2. Confirm `cloud_name`, `api_key`, `api_secret` in the route's `cloudinary.config()` call match the same Cloudinary account.
+  3. Confirm you're not toggling between cloud names (e.g. dev vs prod) mid-session.
+
+### "Missing required parameter - api_key"
+- ❌ Problem: `NEXT_PUBLIC_CLOUDINARY_API_KEY` is unset, so the widget can't include it.
+- ✅ Solution: set `NEXT_PUBLIC_CLOUDINARY_API_KEY` and restart the dev server. Note: API key is public-safe; the **secret** is what must stay server-only.
+
+### Signed upload works locally, fails on Vercel
+- ✅ Checks:
+  1. Are env vars configured on Vercel (Project → Settings → Environment Variables)?
+  2. Is `CLOUDINARY_API_SECRET` set as a **server-side** env var (not exposed to client)?
+  3. Did you redeploy after adding env vars?
+
+## Server-side Upload / Delete Errors
+
+### "Must supply api_key" on `cloudinary.uploader.upload`
+- ❌ Problem: `cloudinary.config(...)` not called, or env vars unset on the server.
+- ✅ Solution: call `cloudinary.config({ cloud_name, api_key, api_secret })` once at the top of the server file (idempotent). Confirm env vars are present in the runtime where the action/route runs.
+
+### `File is not a valid input` on `cloudinary.uploader.upload`
+- ❌ Problem: Passing a `File` / `Blob` directly. The Node SDK doesn't accept those.
+- ✅ Solution: convert to a `Buffer` (or base64 string / data URI), then use `upload_stream(...).end(buffer)` or `upload(`data:${mime};base64,${b64}`)`.
+
+### Edge runtime fails: "Module not found: 'fs'" / "Module not found: 'crypto'"
+- ❌ Problem: The Cloudinary Node SDK depends on Node APIs.
+- ✅ Solution: ensure the route handler / Server Action runs on the **Node** runtime (default; remove any `export const runtime = 'edge'`).
+
+### `destroy` returns `{ result: 'not found' }` even though the asset exists
+- ✅ Checks:
+  1. `publicId` matches exactly (case-sensitive, includes folder path, no file extension).
+  2. `resource_type` matches the asset (`'image'` is the default; videos need `'video'`).
+  3. Use the same cloud name. A delete request signed for cloud A can't delete in cloud B.
+
+### Deleted asset still loads on the page
+- ❌ Problem: Cached at the CDN.
+- ✅ Solution: pass `invalidate: true` to `destroy` to evict the CDN cache.
+
+## CldVideoPlayer Errors
+
+### "Cannot find module 'next-cloudinary/dist/cld-video-player.css'"
+- ✅ Solution: install / upgrade `next-cloudinary`. The path is exactly that — no other variant is exposed.
+
+### Player styles are broken / unstyled controls
+- ❌ Problem: CSS not imported.
+- ✅ Solution: `import 'next-cloudinary/dist/cld-video-player.css';` once on a layout or the page using the player.
+
+### Player throws hydration / removeChild errors
+- ❌ Problem: Component is in a Server Component, or the page suspends and unmounts the player at the wrong time.
+- ✅ Solution: add `"use client"` to the file. Wrap the player in its own component if needed so it's not torn down by parent suspense.
+
+### Video doesn't autoplay
+- ❌ Problem: Browsers block autoplay with sound. The `autoplay` prop also takes a string `autoplayMode` (e.g. `"on-scroll"`).
+- ✅ Solution: pass `muted` along with `autoplay` for unconditional autoplay; or use `autoplay="on-scroll"` for play-when-visible.
+
+## CldOgImage / Social card Errors
+
+### `<CldOgImage>` renders nothing in the App Router
+- ❌ Problem: It only works in the Pages Router.
+- ✅ Solution: in the App Router, use `getCldOgImageUrl` inside `generateMetadata` and put the URL into `metadata.openGraph.images` and `metadata.twitter.images`.
+
+### OG image is correct on a single page but stale on social media
+- ❌ Problem: Social platforms cache OG images aggressively.
+- ✅ Solution: change the URL (e.g. add a query param like `?v=2`) or re-scrape via the platform's debugger (Facebook / X / LinkedIn each provide one).
+
+## TypeScript Errors
+
+### "Property 'paramsToSign' does not exist on type 'unknown'"
+- ✅ Solution: type the request body in your route handler:
+  ```ts
+  const { paramsToSign } = (await request.json()) as { paramsToSign: Record<string, string | number> };
+  ```
+
+### "Type '{ public_id: string; … }' is not assignable to type 'string'"
+- ❌ Problem: Treating `result.info` as a string in some branches and an object in others.
+- ✅ Solution: narrow with a type guard (`isUploadInfo`) before accessing object fields.
+
+### "Property 'NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME' does not exist on type 'ProcessEnv'"
+- ✅ Solution: declare the env vars in an `env.d.ts` (see "Environment Variable Typing" above).
+
+### "Type 'null' is not assignable to type 'RefObject<…>'"
+- ✅ Solution: type refs with the actual element / instance type:
+  ```ts
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const playerRef = useRef<unknown>(null);
+  ```
+
+---
+
+## Quick Reference Checklist
+
+When something isn't working, check:
+- [ ] **Picked the right tool?** → `<CldImage>` for JSX images, `getCldImageUrl` for URL strings, `<CldUploadWidget>` for browser uploads, `cloudinary.uploader.upload` (Node SDK, server) for server-side uploads, `cloudinary.uploader.destroy` (Node SDK, server) for deletes
+- [ ] **`"use client"`** at the top of any file using `<CldUploadWidget>`, `<CldUploadButton>`, `<CldVideoPlayer>`, or any `<CldImage>` with event handlers / refs
+- [ ] **Env vars**: `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` set; `CLOUDINARY_API_SECRET` (server only, NEVER prefixed with `NEXT_PUBLIC_`); dev server restarted after edits
+- [ ] **`.env.local` in `.gitignore`** — never commit secrets
+- [ ] **`<CldImage src>`** is a Cloudinary public ID (no extension, no leading slash) — or a full URL with `/v1234/` and `preserveTransformations`
+- [ ] **`<CldImage>`**: pass `sizes` for responsive images; for `aspectRatio` also use `fill` and a crop mode and omit `width`/`height`
+- [ ] **Dynamic crops** (`thumb`, etc.): use `crop={{ type: 'thumb', source: true }}` to keep results consistent across breakpoints
+- [ ] **`<CldVideoPlayer>`**: `"use client"` + `import 'next-cloudinary/dist/cld-video-player.css'`
+- [ ] **`<CldUploadWidget>` unsigned**: preset is **Unsigned** in the dashboard, name matches `uploadPreset` exactly
+- [ ] **`<CldUploadWidget>` signed**: `signatureEndpoint="/api/sign-cloudinary-params"`; route returns `{ signature }`; uses Node SDK v2 (`import { v2 as cloudinary } from 'cloudinary'`); runs on Node runtime
+- [ ] **Use `onSuccess`** (not deprecated `onUpload`); narrow `result.info` with a type guard before reading `public_id`
+- [ ] **Server uploads**: `"use server"` (or route handler), Node runtime, convert `File` → `Buffer` before `upload_stream`
+- [ ] **Delete**: `cloudinary.uploader.destroy(publicId, { resource_type, invalidate: true })`; `result === 'ok'` on success
+- [ ] **OG images**: App Router → `getCldOgImageUrl` in `generateMetadata`; Pages Router → `<CldOgImage>` outside `<Head>`
+- [ ] **Overlays**: `publicId` (image) or `text` (text) per overlay; gravity uses underscores (`"south_east"`); blend modes go in `appliedEffects`
+- [ ] **Installing Cloudinary packages**: `npm install <package>` with no version; use caret in `package.json`; valid names are `next-cloudinary` and `cloudinary`
+- [ ] **TypeScript**: define an upload-result interface; type env vars in `env.d.ts`; use `unknown` + guards instead of `any`
+- [ ] **Sample assets** (`samples/cloudinary-icon`, `samples/elephants`, etc.) may have been deleted — handle `onError` and provide an upload path
+
