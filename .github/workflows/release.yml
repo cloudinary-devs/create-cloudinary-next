@@ -1,0 +1,196 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run only (no git push, no tags, no npm publish)'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
+  issues: write
+  pull-requests: write
+
+# Allow GitHub Actions to bypass branch protection
+# This is required for semantic-release to push version updates
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify admin permissions
+        run: |
+          # Use the repository's permission endpoint which works for both personal and org repos
+          RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission")
+
+          # Extract permission using jq if available, otherwise use grep
+          if command -v jq &> /dev/null; then
+            PERMISSION=$(echo "$RESPONSE" | jq -r '.permission // empty')
+          else
+            PERMISSION=$(echo "$RESPONSE" | grep -o '"permission":"[^"]*"' | head -1 | cut -d'"' -f4)
+          fi
+
+          if [ -z "$PERMISSION" ]; then
+            echo "Warning: Could not determine permission level. Response: $RESPONSE"
+            echo "Note: workflow_dispatch requires write access, proceeding..."
+            exit 0
+          fi
+
+          if [ "$PERMISSION" != "admin" ]; then
+            echo "Error: Only repository admins can trigger releases. Current permission: $PERMISSION"
+            exit 1
+          fi
+
+          echo "✓ Verified admin permission for ${{ github.actor }}"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Setup git branch
+        run: |
+          git fetch --all --tags --force
+          git fetch origin '+refs/notes/*:refs/notes/*' || true
+          git checkout -B main
+          git branch --set-upstream-to=origin/main main
+
+      - name: Ensure master branch exists (for semantic-release validation)
+        run: |
+          # semantic-release requires at least one release branch that exists; repo uses main, we declare "master"
+          if ! git ls-remote --heads origin master 2>/dev/null | grep -q .; then
+            git checkout -b master
+            git push origin master
+            git checkout main
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+          always-auth: true
+
+      - run: npm ci
+
+      - run: npm test --if-present
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add semantic-release note (dry run only)
+        if: github.event.inputs.dry_run == 'true'
+        run: |
+          set -e
+          if ! git rev-parse --verify v1.0.0-beta.1 >/dev/null 2>&1; then exit 0; fi
+          git notes --ref semantic-release-v1.0.0-beta.1 add -f -m '{"channels":["beta"]}' v1.0.0-beta.1
+          echo "Added semantic-release note to v1.0.0-beta.1 (local only for dry run)."
+
+      - name: Dry run mode notice
+        if: github.event.inputs.dry_run == 'true'
+        run: |
+          echo "=============================================="
+          echo "  DRY RUN MODE - No commits, tags, or publish"
+          echo "=============================================="
+          echo "Semantic-release will show what WOULD happen."
+          echo "To perform a real release, run again and uncheck 'Dry run only'."
+          echo ""
+
+      - name: Ensure v1.0.0-beta.1 exists locally (dry run only)
+        if: github.event.inputs.dry_run == 'true'
+        run: |
+          if ! git rev-parse --verify "v1.0.0-beta.1" >/dev/null 2>&1; then
+            # So semantic-release sees a "previous release" and suggests 1.0.0-beta.2 for new commits
+            PARENT=$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)
+            git tag -a "v1.0.0-beta.1" "$PARENT" -m "chore: initial beta release (dry-run placeholder)"
+            echo "Created local tag v1.0.0-beta.1 at $PARENT so semantic-release can compute next version (1.0.0-beta.2)."
+          else
+            echo "Tag v1.0.0-beta.1 already exists."
+          fi
+
+      - name: Get version before semantic-release
+        id: version-before
+        run: |
+          VERSION_BEFORE=$(node -p "require('./package.json').version")
+          echo "version=$VERSION_BEFORE" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION_BEFORE"
+
+      - name: Release with semantic-release
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          set -e
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "Running semantic-release in DRY RUN mode..."
+            npx semantic-release --dry-run 2>&1 | tee semantic-release.log || true
+            grep -oE "The next release version is [^[:space:]]+" semantic-release.log 2>/dev/null | sed 's/The next release version is //' > next-version.txt || echo "" > next-version.txt
+          else
+            npx semantic-release
+          fi
+
+      # npm publish uses OIDC (id-token: write + --provenance). No NPM_TOKEN needed.
+      # Require on npmjs.com: Package → Package settings → Trusted publishers →
+      #   Add: GitHub Actions, org cloudinary-devs, repo create-cloudinary-next, workflow release.yml
+      # npm trusted publishing (OIDC) requires npm CLI 11.5.1+; Node 20 ships with npm 9.x.
+      # Force OIDC-only: override NPM_CONFIG_USERCONFIG so npm ignores setup-node's .npmrc (which may reference a stale token).
+      - name: Publish to npm using trusted publishing
+        if: github.event.inputs.dry_run != 'true'
+        env:
+          NODE_AUTH_TOKEN: ''
+          NPM_TOKEN: ''
+          NPM_CONFIG_USERCONFIG: '${{ runner.temp }}/.npmrc-oidc'
+        run: |
+          echo "=== Publishing to npm with trusted publishing (OIDC) ==="
+          unset NODE_AUTH_TOKEN NPM_TOKEN 2>/dev/null || true
+          # Config that has only registry — no _authToken — so npm uses OIDC
+          echo "registry=https://registry.npmjs.org/" > "$NPM_CONFIG_USERCONFIG"
+          # OIDC for publish requires npm 11.5.1+ (Node 20 ships with npm 9.x)
+          npm install -g npm@latest
+          npm --version
+
+          # Get versions
+          VERSION_BEFORE="${{ steps.version-before.outputs.version }}"
+          VERSION_AFTER=$(node -p "require('./package.json').version")
+
+          echo "Version before: $VERSION_BEFORE"
+          echo "Version after: $VERSION_AFTER"
+
+          # Only publish if semantic-release created a new version
+          if [ "$VERSION_BEFORE" != "$VERSION_AFTER" ]; then
+            echo "✓ New version detected: $VERSION_AFTER"
+            echo "Publishing to npm..."
+
+            # Publish using npm publish which supports OIDC/trusted publishing
+            # --tag latest so installers get the most recent version (npm i create-cloudinary-next / npx create-cloudinary-next)
+            npm publish --provenance --access public --tag latest
+            echo "✓ Published $VERSION_AFTER to npm"
+          else
+            echo "No version change detected (version: $VERSION_AFTER)"
+            echo "Skipping npm publish - no new release was created"
+          fi
+
+      - name: Dry run - skip npm publish
+        if: github.event.inputs.dry_run == 'true'
+        run: |
+          echo "=============================================="
+          echo "  DRY RUN - Skipping npm publish"
+          echo "=============================================="
+          NEXT_VERSION=$(cat next-version.txt 2>/dev/null || echo "")
+          if [ -n "$NEXT_VERSION" ]; then
+            echo "Version that WOULD have been published: $NEXT_VERSION"
+          else
+            echo "Version that WOULD have been published: (check semantic-release output above; might be no new release)"
+            echo "Current package.json: $(node -p "require('./package.json').version")"
+          fi
+          echo ""
+          echo "To publish for real, run the workflow again with 'Dry run only' unchecked."
