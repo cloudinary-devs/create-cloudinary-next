@@ -2,7 +2,8 @@
 
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { existsSync, mkdirSync, writeFileSync, readFileSync, cpSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, cpSync, mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 import { spawnSync } from 'child_process';
 import { parseArgs } from 'node:util';
 import inquirer from 'inquirer';
@@ -12,10 +13,15 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const TEMPLATE_REPO = 'cloudinary-devs/create-cloudinary-next-template';
+const SKILLS_REPO = 'https://github.com/cloudinary-devs/skills.git';
 
 const TEMPLATES_DIR = join(__dirname, 'templates');
+const LOCAL_SKILLS_DIR = join(TEMPLATES_DIR, 'skills');
 
 const SUPPORTED_PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+const GENERIC_AI_TOOLS = new Set(['cursor', 'copilot', 'generic']);
+const REMOTE_BACKED_SKILLS = ['cloudinary-docs', 'cloudinary-transformations'];
+const ALL_SKILLS = ['cloudinary-next', ...REMOTE_BACKED_SKILLS];
 
 function pkgFromUserAgent(userAgent) {
   if (!userAgent) return undefined;
@@ -80,12 +86,33 @@ function readTemplate(relativePath) {
   return readFileSync(templatePath, 'utf-8');
 }
 
+function findSkillSourceDir(baseDir, skillName) {
+  const candidates = [join(baseDir, 'skills', skillName), join(baseDir, skillName)];
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
 function writeFileEnsureDir(filePath, content) {
   const fileDir = dirname(filePath);
   if (!existsSync(fileDir)) {
     mkdirSync(fileDir, { recursive: true });
   }
   writeFileSync(filePath, content);
+}
+
+function copySkillDir(sourceDir, targetRoot, skillName) {
+  mkdirSync(targetRoot, { recursive: true });
+  cpSync(sourceDir, join(targetRoot, skillName), { recursive: true });
+}
+
+function cloneSkillsRepo() {
+  const tempDir = mkdtempSync(join(tmpdir(), 'cloudinary-skills-'));
+  try {
+    runCommand(['git', 'clone', '--depth', '1', SKILLS_REPO, tempDir], process.cwd());
+    return tempDir;
+  } catch (error) {
+    rmSync(tempDir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function writeEnvLocal(projectPath, templateVars, hasUploadPreset) {
@@ -100,13 +127,59 @@ function writeEnvLocal(projectPath, templateVars, hasUploadPreset) {
 
 function writeSkill(projectPath, aiTools) {
   if (!aiTools || aiTools.length === 0) return;
-  const skillSrc = join(TEMPLATES_DIR, 'next-cloudinary');
 
+  const targetRoots = [];
   if (aiTools.includes('claude')) {
-    cpSync(skillSrc, join(projectPath, '.claude', 'skills', 'next-cloudinary'), { recursive: true });
+    targetRoots.push(join(projectPath, '.claude', 'skills'));
   }
-  if (aiTools.includes('cursor') || aiTools.includes('copilot') || aiTools.includes('generic')) {
-    cpSync(skillSrc, join(projectPath, '.agents', 'skills', 'next-cloudinary'), { recursive: true });
+  if (aiTools.some((tool) => GENERIC_AI_TOOLS.has(tool))) {
+    targetRoots.push(join(projectPath, '.agents', 'skills'));
+  }
+
+  if (targetRoots.length === 0) return;
+
+  const localFallbacks = {
+    'cloudinary-next': join(LOCAL_SKILLS_DIR, 'cloudinary-next'),
+    'cloudinary-docs': join(LOCAL_SKILLS_DIR, 'cloudinary-docs'),
+    'cloudinary-transformations': join(LOCAL_SKILLS_DIR, 'cloudinary-transformations'),
+  };
+
+  let remoteRepoDir;
+  let remoteInstallAvailable = false;
+
+  try {
+    remoteRepoDir = cloneSkillsRepo();
+    remoteInstallAvailable = true;
+  } catch (error) {
+    console.log(chalk.yellow('  Remote Cloudinary skills install failed; using bundled local backups.'));
+  }
+
+  try {
+    for (const targetRoot of targetRoots) {
+      for (const skillName of ALL_SKILLS) {
+        let sourceDir;
+
+        if (skillName === 'cloudinary-next') {
+          sourceDir = localFallbacks[skillName];
+        } else if (remoteInstallAvailable) {
+          sourceDir = findSkillSourceDir(remoteRepoDir, skillName);
+        }
+
+        if (!sourceDir) {
+          sourceDir = localFallbacks[skillName];
+        }
+
+        if (!sourceDir || !existsSync(sourceDir)) {
+          throw new Error(`Skill source not found for ${skillName}`);
+        }
+
+        copySkillDir(sourceDir, targetRoot, skillName);
+      }
+    }
+  } finally {
+    if (remoteRepoDir) {
+      rmSync(remoteRepoDir, { recursive: true, force: true });
+    }
   }
 }
 
@@ -325,12 +398,16 @@ function printSuccessBanner({ projectName, projectPath, aiTools, hasUploadPreset
   const aiFilesCreated = aiTools && aiTools.length > 0;
 
   if (aiFilesCreated) {
-    console.log(chalk.cyan('\nAI assistant skill installed:'));
-    if (aiTools.includes('claude')) console.log(chalk.gray('  - Claude Code: .claude/skills/next-cloudinary/'));
-    if (aiTools.includes('cursor') || aiTools.includes('copilot') || aiTools.includes('generic')) console.log(chalk.gray('  - Cursor / Copilot / Generic: .agents/skills/next-cloudinary/'));
+    console.log(chalk.cyan('\nAI assistant skills installed:'));
+    if (aiTools.includes('claude')) {
+      console.log(chalk.gray('  - Claude Code: .claude/skills/cloudinary-next/, cloudinary-docs/, cloudinary-transformations/'));
+    }
+    if (aiTools.some((tool) => GENERIC_AI_TOOLS.has(tool))) {
+      console.log(chalk.gray('  - Cursor / Copilot / Generic: .agents/skills/cloudinary-next/, cloudinary-docs/, cloudinary-transformations/'));
+    }
     if (aiTools.includes('cursor')) console.log(chalk.gray('  - MCP (Cursor): .cursor/mcp.json'));
     if (aiTools.includes('claude')) console.log(chalk.gray('  - MCP (Claude Code): .mcp.json'));
-    console.log(chalk.gray('\n  This skill teaches your AI assistant about Next.js + Cloudinary patterns and best practices.'));
+    console.log(chalk.gray('\n  These skills teach your AI assistant about Next.js + Cloudinary patterns and best practices.'));
     console.log(chalk.gray('\n  How to use it:'));
     console.log(chalk.gray('    - Open your project in your AI assistant - the skill is already loaded'));
     console.log(chalk.gray('    - Ask your AI to help build Cloudinary features, and it will follow these patterns'));

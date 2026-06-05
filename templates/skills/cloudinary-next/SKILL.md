@@ -1,9 +1,9 @@
 ---
-name: next-cloudinary
+name: cloudinary-next
 description: guidance for building, debugging, and reviewing next.js apps that use cloudinary through next-cloudinary and the cloudinary node sdk v2. use for tasks involving cldimage, cldvideoplayer, clduploadwidget, clduploadbutton, cldogimage, getcldimageurl, getcldogimageurl, getcldvideourl, signed uploads, server uploads, deletes, transformations, responsive images, overlays, social cards, environment variables, and common cloudinary errors.
 ---
 
-# Next Cloudinary
+# Cloudinary Next
 
 ## Purpose
 
