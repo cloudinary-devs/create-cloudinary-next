@@ -9,10 +9,11 @@
   "keywords": [
     "cloudinary",
     "next",
+    "next.js",
     "typescript",
     "scaffold"
   ],
-  "author": "",
+  "author": "Cloudinary, Inc.",
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
