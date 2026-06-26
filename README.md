@@ -11,7 +11,13 @@ I make this easy by creating a temporary alias. Run this within the cloned direc
 alias create-cloudinary-next="node $(pwd)/cli.js"
 ```
 
-And then you can just type
+And then, from a directory within which you want to create a project...
+
+```
+cd ~/dev/
+```
+
+...you can just type:
 
 ```
 create-cloudinary-next
