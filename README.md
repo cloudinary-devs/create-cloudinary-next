@@ -8,7 +8,7 @@ Pull this directory, run `npm i` within it, an then execute its `cli.js` from an
 I make this easy by creating a temporary alias. Run this within the cloned directory.
 
 ```
-alias create-cloudinary-next="$(realpath cli.js)"
+alias create-cloudinary-next="node $(pwd)/cli.js"
 ```
 
 And then you can just type
