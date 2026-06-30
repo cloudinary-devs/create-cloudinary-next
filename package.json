@@ -1,6 +1,6 @@
 {
   "name": "create-cloudinary-next",
-  "version": "1.0.0-beta-0",
+  "version": "1.0.0-beta.1",
   "description": "Scaffold a Cloudinary Next.js project with interactive setup",
   "type": "module",
   "bin": {
