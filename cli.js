@@ -20,8 +20,7 @@ const LOCAL_SKILLS_DIR = join(TEMPLATES_DIR, 'skills');
 
 const SUPPORTED_PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
 const GENERIC_AI_TOOLS = new Set(['cursor', 'copilot', 'generic']);
-const REMOTE_BACKED_SKILLS = ['cloudinary-docs', 'cloudinary-transformations'];
-const ALL_SKILLS = ['cloudinary-next', ...REMOTE_BACKED_SKILLS];
+const ALL_SKILLS = ['cloudinary-next', 'cloudinary-docs', 'cloudinary-transformations'];
 
 function pkgFromUserAgent(userAgent) {
   if (!userAgent) return undefined;
@@ -159,9 +158,7 @@ function writeSkill(projectPath, aiTools) {
       for (const skillName of ALL_SKILLS) {
         let sourceDir;
 
-        if (skillName === 'cloudinary-next') {
-          sourceDir = localFallbacks[skillName];
-        } else if (remoteInstallAvailable) {
+        if (remoteInstallAvailable) {
           sourceDir = findSkillSourceDir(remoteRepoDir, skillName);
         }
 
