@@ -1,3 +1,10 @@
+# [1.0.0-beta.2](https://github.com/cloudinary-devs/create-cloudinary-next/compare/v1.0.0-beta.1...v1.0.0-beta.2) (2026-07-10)
+
+
+### Features
+
+* load cloudinary-next skill from canonical hosted version ([8613726](https://github.com/cloudinary-devs/create-cloudinary-next/commit/8613726be183d5c625588e65e3df0ac895280191))
+
 # 1.0.0-beta.1 (2026-06-30)
 
 
