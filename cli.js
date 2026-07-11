@@ -22,6 +22,9 @@ const SUPPORTED_PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
 const GENERIC_AI_TOOLS = new Set(['cursor', 'copilot', 'generic']);
 const ALL_SKILLS = ['cloudinary-next', 'cloudinary-docs', 'cloudinary-transformations'];
 
+const link = (text, url) =>
+  `\u001B]8;;${url}\u0007${text}\u001B]8;;\u0007`;
+
 function pkgFromUserAgent(userAgent) {
   if (!userAgent) return undefined;
   const pkgSpec = userAgent.split(' ')[0];
@@ -278,7 +281,7 @@ function parseHeadlessArgs() {
 async function promptInteractive() {
   console.log(chalk.cyan.bold('\nCloudinary Next.js Starter Kit\n'));
   console.log(
-    chalk.gray('Need a Cloudinary account? Sign up for free: https://cloudinary.com/users/register/free\n')
+    chalk.gray(`Need a Cloudinary account? Sign up for free: ${link("https://cloudinary.com/users/register/free", "https://link.cloudinary.com/ursWm")}\n`)
   );
 
   const questions = [
@@ -305,15 +308,15 @@ async function promptInteractive() {
       name: 'cloudName',
       message:
         "What's your Cloudinary cloud name?\n" +
-        chalk.gray(' -> Find your cloud name: https://console.cloudinary.com/app/home/dashboard') +
+        chalk.gray(` -> Find your cloud name: ${link("https://console.cloudinary.com/app/home/dashboard", "https://console.cloudinary.com/app/home/dashboard")}`) +
         '\n',
       validate: (input) => {
         if (!input.trim()) {
           return chalk.yellow(
-            'Cloud name is required.\n' +
-              ' -> Sign up: https://cloudinary.com/users/register/free\n' +
-              ' -> Find your cloud name: https://console.cloudinary.com/app/home/dashboard'
-          );
+            `Cloud name is required.\n` +
+            ` -> Sign up: ${link('https://cloudinary.com/users/register/free', 'https://link.cloudinary.com/ursWm')}\n` +
+            ` -> Find your cloud name: ${link('https://console.cloudinary.com/app/home/dashboard', 'https://console.cloudinary.com/app/home/dashboard')}`
+        );
         }
         if (!isValidCloudName(input)) {
           return 'Cloud name can only contain lowercase letters, numbers, hyphens, and underscores';
@@ -328,7 +331,7 @@ async function promptInteractive() {
         'Do you have an unsigned upload preset?\n' +
         chalk.gray(' -> An unsigned upload preset allows users to upload files directly from your app.') +
         '\n' +
-        chalk.gray(' -> Create one here: https://console.cloudinary.com/app/settings/upload/presets') +
+        chalk.gray(` -> Create one here: ${link("https://console.cloudinary.com/app/settings/upload/presets", "https://console.cloudinary.com/app/settings/upload/presets")}`) +
         '\n' +
         chalk.gray('    (Set signing mode to "Unsigned" when creating)\n'),
       default: false,
@@ -415,7 +418,7 @@ function printSuccessBanner({ projectName, projectPath, aiTools, hasUploadPreset
     console.log(chalk.yellow('\nNote: Upload preset not configured'));
     console.log(chalk.gray('  - Uploads require an unsigned upload preset'));
     console.log(chalk.cyan('\n  To enable uploads:'));
-    console.log(chalk.cyan('    1. Go to https://console.cloudinary.com/app/settings/upload/presets'));
+    console.log(chalk.cyan(`    1. Go to ${link("https://console.cloudinary.com/app/settings/upload/presets", "https://console.cloudinary.com/app/settings/upload/presets")}`));
     console.log(chalk.cyan('    2. Click "Add upload preset"'));
     console.log(chalk.cyan('    3. Set it to "Unsigned" mode'));
     console.log(chalk.cyan('    4. Add the preset name to your .env.local as NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET'));
