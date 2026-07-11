@@ -27,7 +27,7 @@ npx create-cloudinary-next
 
 - **Node.js** — use a [current LTS](https://nodejs.org/en/about/previous-releases) release.
 - A **Cloudinary account**
-  - [Sign up for free](https://cloudinary.com/users/register_free)
+  - [Sign up for free](https://link.cloudinary.com/ursWi)
   - Your cloud name is in your [dashboard](https://console.cloudinary.com/app/home/dashboard)
 
 ## Features
