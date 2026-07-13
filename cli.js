@@ -281,7 +281,7 @@ function parseHeadlessArgs() {
 async function promptInteractive() {
   console.log(chalk.cyan.bold('\nCloudinary Next.js Starter Kit\n'));
   console.log(
-    chalk.gray(`Need a Cloudinary account? Sign up for free: ${link("https://cloudinary.com/users/register/free", "https://link.cloudinary.com/ursWm")}\n`)
+    chalk.gray(`Need a Cloudinary account? Sign up for free: ${link("https://cld.media/nextregister", "https://cld.media/nextregister")}\n`)
   );
 
   const questions = [
@@ -314,7 +314,7 @@ async function promptInteractive() {
         if (!input.trim()) {
           return chalk.yellow(
             `Cloud name is required.\n` +
-            ` -> Sign up: ${link('https://cloudinary.com/users/register/free', 'https://link.cloudinary.com/ursWm')}\n` +
+            ` -> Sign up: ${link('https://cld.media/nextregister', 'https://cld.media/nextregister')}\n` +
             ` -> Find your cloud name: ${link('https://console.cloudinary.com/app/home/dashboard', 'https://console.cloudinary.com/app/home/dashboard')}`
         );
         }
