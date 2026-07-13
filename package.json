@@ -29,6 +29,11 @@
   "bugs": {
     "url": "https://github.com/cloudinary-devs/create-cloudinary-next/issues"
   },
+  "dependencies": {
+    "inquirer": "^9.2.15",
+    "chalk": "^5.3.0",
+    "fs-extra": "^11.2.0"
+  },
   "devDependencies": {
     "@commitlint/cli": "^19.6.0",
     "@commitlint/config-conventional": "^19.6.0",
