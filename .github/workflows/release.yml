@@ -154,8 +154,9 @@ jobs:
           unset NODE_AUTH_TOKEN NPM_TOKEN 2>/dev/null || true
           # Config that has only registry — no _authToken — so npm uses OIDC
           echo "registry=https://registry.npmjs.org/" > "$NPM_CONFIG_USERCONFIG"
-          # OIDC for publish requires npm 11.5.1+ (Node 20 ships with npm 9.x)
-          npm install -g npm@latest
+          # OIDC for publish requires npm 11.5.1+ (Node 20 ships with npm 9.x).
+          # Pinned to the npm 11 line (not "latest") because npm 12 dropped Node 20 support.
+          npm install -g npm@11
           npm --version
 
           # Get versions
