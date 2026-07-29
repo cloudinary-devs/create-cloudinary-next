@@ -6,6 +6,10 @@
   "bin": {
     "create-cloudinary-next": "./cli.js"
   },
+  "files": [
+    "cli.js",
+    "templates"
+  ],
   "keywords": [
     "cloudinary",
     "next",
