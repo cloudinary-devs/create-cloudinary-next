@@ -1,3 +1,10 @@
+# [1.0.0-beta.4](https://github.com/cloudinary-devs/create-cloudinary-next/compare/v1.0.0-beta.3...v1.0.0-beta.4) (2026-07-29)
+
+
+### Bug Fixes
+
+* force release ([7f3cf2e](https://github.com/cloudinary-devs/create-cloudinary-next/commit/7f3cf2e12ed904f87528f7afadfb24808150971d))
+
 # [1.0.0-beta.3](https://github.com/cloudinary-devs/create-cloudinary-next/compare/v1.0.0-beta.2...v1.0.0-beta.3) (2026-07-15)
 
 
