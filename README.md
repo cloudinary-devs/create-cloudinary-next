@@ -89,3 +89,4 @@ Releases are triggered manually via GitHub Actions workflow. The workflow uses n
 - `docs`: Documentation changes
 - `refactor`: Code refactoring
 - `perf`: Performance improvements
+
