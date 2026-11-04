@@ -2,7 +2,7 @@
 
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { existsSync, mkdirSync, writeFileSync, readFileSync, cpSync, mkdtempSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, cpSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { spawnSync } from 'child_process';
 import { parseArgs } from 'node:util';
@@ -89,8 +89,15 @@ function readTemplate(relativePath) {
 }
 
 function findSkillSourceDir(baseDir, skillName) {
-  const candidates = [join(baseDir, 'skills', skillName), join(baseDir, skillName)];
-  return candidates.find((candidate) => existsSync(candidate));
+  const skillsDir = join(baseDir, 'skills');
+  // The skills repo groups skills into category folders (skills/<category>/<name>)
+  const categoryCandidates = existsSync(skillsDir)
+    ? readdirSync(skillsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => join(skillsDir, entry.name, skillName))
+    : [];
+  const candidates = [join(skillsDir, skillName), ...categoryCandidates, join(baseDir, skillName)];
+  return candidates.find((candidate) => existsSync(join(candidate, 'SKILL.md')));
 }
 
 function writeFileEnsureDir(filePath, content) {
@@ -166,6 +173,9 @@ function writeSkill(projectPath, aiTools) {
         }
 
         if (!sourceDir) {
+          if (remoteInstallAvailable) {
+            console.log(chalk.yellow(`  ${skillName} not found in the Cloudinary skills repo; using the bundled local backup.`));
+          }
           sourceDir = localFallbacks[skillName];
         }
 
