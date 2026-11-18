@@ -2,7 +2,7 @@
 
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { existsSync, mkdirSync, writeFileSync, readFileSync, cpSync, mkdtempSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, cpSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { spawnSync } from 'child_process';
 import { parseArgs } from 'node:util';
@@ -21,6 +21,9 @@ const LOCAL_SKILLS_DIR = join(TEMPLATES_DIR, 'skills');
 const SUPPORTED_PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
 const GENERIC_AI_TOOLS = new Set(['cursor', 'copilot', 'generic']);
 const ALL_SKILLS = ['cloudinary-next', 'cloudinary-docs', 'cloudinary-transformations'];
+// Keep in sync with engines.node in package.json. npm only warns about engines (unless
+// engine-strict is set), so the CLI checks the version itself.
+const MIN_NODE_MAJOR = 22;
 
 const link = (text, url) =>
   `\u001B]8;;${url}\u0007${text}\u001B]8;;\u0007`;
@@ -89,8 +92,15 @@ function readTemplate(relativePath) {
 }
 
 function findSkillSourceDir(baseDir, skillName) {
-  const candidates = [join(baseDir, 'skills', skillName), join(baseDir, skillName)];
-  return candidates.find((candidate) => existsSync(candidate));
+  const skillsDir = join(baseDir, 'skills');
+  // The skills repo groups skills into category folders (skills/<category>/<name>)
+  const categoryCandidates = existsSync(skillsDir)
+    ? readdirSync(skillsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => join(skillsDir, entry.name, skillName))
+    : [];
+  const candidates = [join(skillsDir, skillName), ...categoryCandidates, join(baseDir, skillName)];
+  return candidates.find((candidate) => existsSync(join(candidate, 'SKILL.md')));
 }
 
 function writeFileEnsureDir(filePath, content) {
@@ -157,23 +167,34 @@ function writeSkill(projectPath, aiTools) {
   }
 
   try {
+    // Resolve each skill's source once, so a missing skill is only reported once
+    // even when it's copied into more than one target folder
+    const sourceDirs = {};
+
+    for (const skillName of ALL_SKILLS) {
+      let sourceDir;
+
+      if (remoteInstallAvailable) {
+        sourceDir = findSkillSourceDir(remoteRepoDir, skillName);
+      }
+
+      if (!sourceDir) {
+        if (remoteInstallAvailable) {
+          console.log(chalk.yellow(`  ${skillName} not found in the Cloudinary skills repo; using the bundled local backup.`));
+        }
+        sourceDir = localFallbacks[skillName];
+      }
+
+      if (!sourceDir || !existsSync(sourceDir)) {
+        throw new Error(`Skill source not found for ${skillName}`);
+      }
+
+      sourceDirs[skillName] = sourceDir;
+    }
+
     for (const targetRoot of targetRoots) {
       for (const skillName of ALL_SKILLS) {
-        let sourceDir;
-
-        if (remoteInstallAvailable) {
-          sourceDir = findSkillSourceDir(remoteRepoDir, skillName);
-        }
-
-        if (!sourceDir) {
-          sourceDir = localFallbacks[skillName];
-        }
-
-        if (!sourceDir || !existsSync(sourceDir)) {
-          throw new Error(`Skill source not found for ${skillName}`);
-        }
-
-        copySkillDir(sourceDir, targetRoot, skillName);
+        copySkillDir(sourceDirs[skillName], targetRoot, skillName);
       }
     }
   } finally {
@@ -448,7 +469,20 @@ function printSuccessBanner({ projectName, projectPath, aiTools, hasUploadPreset
   console.log(chalk.cyan.bold('-'.repeat(60) + '\n'));
 }
 
+function checkNodeVersion() {
+  const major = Number(process.versions.node.split('.')[0]);
+  if (major < MIN_NODE_MAJOR) {
+    console.error(
+      chalk.red(`create-cloudinary-next requires Node.js ${MIN_NODE_MAJOR} or later. You're using Node.js ${process.versions.node}.`)
+    );
+    console.error(chalk.yellow('Please upgrade Node.js (https://nodejs.org) and run the command again.'));
+    process.exit(1);
+  }
+}
+
 async function main() {
+  checkNodeVersion();
+
   let answers = {};
   let templateRepoOverride;
 

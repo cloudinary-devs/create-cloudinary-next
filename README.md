@@ -25,7 +25,7 @@ npx create-cloudinary-next
 
 ## Requirements
 
-- **Node.js** — use a [current LTS](https://nodejs.org/en/about/previous-releases) release.
+- **Node.js 22** or later
 - A **Cloudinary account**
   - [Sign up for free](https://cld.media/nextregisterreadme)
   - Your cloud name is in your [dashboard](https://console.cloudinary.com/app/home/dashboard)
