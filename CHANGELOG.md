@@ -1,3 +1,11 @@
+# [1.0.0-beta.5](https://github.com/cloudinary-devs/create-cloudinary-next/compare/v1.0.0-beta.4...v1.0.0-beta.5) (2026-11-19)
+
+
+### Bug Fixes
+
+* check the Node.js version at startup and warn once per missing skill ([d219047](https://github.com/cloudinary-devs/create-cloudinary-next/commit/d219047e8491c66c2d9591c5d428d074d9c0aec5))
+* find skills in category folders and require Node.js 22 ([412645a](https://github.com/cloudinary-devs/create-cloudinary-next/commit/412645a39796a9892f191472c7dc08bb828f3084))
+
 # [1.0.0-beta.4](https://github.com/cloudinary-devs/create-cloudinary-next/compare/v1.0.0-beta.3...v1.0.0-beta.4) (2026-07-29)
 
 
